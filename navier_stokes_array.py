@@ -1,0 +1,172 @@
+import numpy as np
+import harfang as hg
+import helper_2d
+from harfang_shortcut import *
+
+visc = 0.0
+diff = 0.0
+base_force_u, base_force_v, base_force_dens = 5, 5, 100
+
+N = 16
+size = (N + 2) * (N + 2)
+
+u = np.zeros((size))
+v = np.zeros((size))
+u_prev = np.zeros((size))
+v_prev = np.zeros((size))
+dens = np.zeros((size))
+dens_prev = np.zeros((size))
+
+
+def IX(i,j):
+   return ((i) + (N + 2) * (j))
+
+
+def add_source(N, x, s, dt):
+	x += dt * s
+	
+
+def set_bnd(N, b, x):
+	for i in range(1, N+1):
+		x[IX(0 ,i)] = x[IX(1,i)] * -1 if(b == 1) else x[IX(1,i)]
+		x[IX(N + 1,i)] = x[IX(N,i)] * -1 if(b == 1) else x[IX(N,i)]
+		x[IX(i,0)] = x[IX(i,1)] * -1 if(b == 2) else x[IX(i,1)]
+		x[IX(i,N + 1)] = x[IX(i,N)] * -1 if(b == 2) else x[IX(i,N)]
+	
+	x[IX(0 ,0)] = 0.5 * (x[IX(1,0)] + x[IX(0 ,1)])
+	x[IX(0 ,N + 1)] = 0.5 * (x[IX(1,N + 1)] + x[IX(0 ,N)])
+	x[IX(N + 1,0)] = 0.5 * (x[IX(N,0)] + x[IX(N + 1,1)])
+	x[IX(N + 1,N + 1)] = 0.5 * (x[IX(N,N + 1)] + x[IX(N + 1,N)])
+
+
+def lin_solve(N, b, x, x0, a, c):
+	for k in range(20):
+		for i in range(1, N+1):
+			for j in range(1, N+1):
+				x[IX(i,j)] = (x0[IX(i,j)] + a * (x[IX(i - 1,j)] + x[IX(i + 1,j)] + x[IX(i,j - 1)] + x[IX(i,j + 1)])) / c
+		
+		set_bnd(N, b, x)
+
+
+def diffuse(N, b, x, x0, diff, dt):	
+	a = dt * diff * N * N
+	lin_solve(N, b, x, x0, a, 1 + 4 * a)
+	
+
+def advect(N, b, d, d0, u, v, dt):
+	dt0 = dt * N
+	for i in range(1, N+1):
+		for j in range(1, N+1):
+			x = i - dt0 * u[IX(i,j)]
+			y = j - dt0 * v[IX(i,j)]
+			if x < 0.5:
+				x = 0.5 
+			if x > N + 0.5:
+			   x = N + 0.5
+			i0 = int(x)
+			i1 = i0 + 1
+			if y < 0.5: 
+				y = 0.5
+			if y > N + 0.5:
+			   y = N + 0.5 
+			j0 = int(y)
+			j1 = j0 + 1
+			s1 = x - i0 
+			s0 = 1 - s1 
+			t1 = y - j0 
+			t0 = 1 - t1
+			d[IX(i,j)] = s0 * (t0 * d0[IX(i0,j0)] + t1 * d0[IX(i0,j1)]) + s1 * (t0 * d0[IX(i1,j0)] + t1 * d0[IX(i1,j1)])
+			
+	set_bnd(N, b, d)
+	
+
+def dens_step(N, x, x0, u, v, diff, dt):
+	add_source(N, x, x0, dt)
+	x0, x = x, x0
+	diffuse(N, 0, x, x0, diff, dt)
+	x0, x = x, x0
+	advect(N, 0, x, x0, u, v, dt)
+
+
+def project(N, u, v, p, div):
+	for i in range(1, N + 1):
+		for j in range(1, N + 1):
+			div[IX(i,j)] = -0.5 * (u[IX(i + 1,j)] - u[IX(i - 1,j)] + v[IX(i,j + 1)] - v[IX(i,j - 1)]) / N
+			p[IX(i,j)] = 0
+		
+	set_bnd(N, 0, div)
+	set_bnd(N, 0, p)	
+	
+	lin_solve(N, 0, p, div, 1, 4)
+
+	for i in range(1, N + 1):
+		for j in range(1, N + 1):
+			u[IX(i,j)] -= 0.5 * N * (p[IX(i + 1,j)] - p[IX(i - 1,j)])
+			v[IX(i,j)] -= 0.5 * N * (p[IX(i,j + 1)] - p[IX(i,j - 1)])
+		
+	set_bnd(N, 1, u)
+	set_bnd(N, 2, v)
+
+	
+def vel_step(N, u, v, u0, v0, visc, dt):
+	add_source(N, u, u0, dt)
+	add_source(N, v, v0, dt)
+	u0, u = u, u0
+	diffuse(N, 1, u, u0, visc, dt)
+	v0, v = v, v0
+	diffuse(N, 2, v, v0, visc, dt)
+	project(N, u, v, u0, v0)
+	u0, u = u, u0
+	v0, v = v, v0
+	advect(N, 1, u, u0, u0, v0, dt) 
+	advect(N, 2, v, v0, u0, v0, dt)
+	project(N, u, v, u0, v0)
+
+
+def get_from_UI(dens_prev, u_prev, v_prev):
+	dens_prev[:] = 0.0
+	u_prev[:] = 0.0
+	v_prev[:] = 0.0
+
+	if  hg.GetPlus().KeyDown(hg.KeyF1):
+		dens_prev[IX(1, 1)] = base_force_dens
+	if  hg.GetPlus().KeyDown(hg.KeyF2):
+		for i in range (2, 5):
+			v_prev[IX(i, 5)] = base_force_v
+	if  hg.GetPlus().KeyDown(hg.KeyF3):
+		u_prev[IX(3, 3)] = base_force_u
+	if  hg.GetPlus().KeyDown(hg.KeyF4):
+		u_prev[IX(int(N/2.0), int(N/2.0))] = base_force_u
+		v_prev[IX(int(N/2.0), int(N/2.0))] = base_force_v
+	
+	#for i in range(1, N+1):
+	#	v_prev[IX(1, i)] = base_force_v if int(N/3) < i < int(N/3*2) else 0
+	#	u_prev[IX(1, i)] = 0
+
+false_texture = hg.GetPlus().LoadTexture("")
+
+def draw_dens(simple_graphic_scene_overlay, N, dens, u, v):	
+	scale = 1
+	for i in range(1, N + 1):
+		for j in range(1, N + 1):
+			p = vec3(i / (N) - 0.5, j / (N) - 0.5, 0)
+			helper_2d.draw_line(simple_graphic_scene_overlay, p, p + vec3(u[IX(i, j)], v[IX(i, j)], 0))
+			helper_2d.draw_quad(simple_graphic_scene_overlay, mat4.TransformationMatrix(p + vec3(0, 0, 0.1), vec3(0, 0, 0)), 1 / N, 1 / N, false_texture, col(dens[IX(i, j)], 0, 0))
+
+	
+def simulation_step(simple_graphic_scene_overlay, dt):
+	global visc, diff, base_force_u, base_force_v, base_force_dens
+	hg.ImGuiLock()
+	if hg.ImGuiBegin("params"):
+		visc = hg.ImGuiSliderFloat("visc", visc, 0.0, 10.0)[1]
+		diff = hg.ImGuiSliderFloat("diff", diff, 0.0, 1000.0)[1]
+		base_force_u = hg.ImGuiSliderFloat("base_force_u", base_force_u, 0.0, 1000.0)[1]		
+		base_force_v = hg.ImGuiSliderFloat("base_force_v", base_force_v, 0.0, 1000.0)[1]		
+		base_force_dens = hg.ImGuiSliderFloat("base_force_dens", base_force_dens, 0.0, 1000.0)[1]		
+	hg.ImGuiEnd()
+	hg.ImGuiUnlock()
+
+	get_from_UI(dens_prev, u_prev, v_prev)
+	vel_step(N, u, v, u_prev, v_prev, visc, dt)
+	dens_step(N, dens, dens_prev, u, v, diff, dt)
+	draw_dens(simple_graphic_scene_overlay, N, dens, u, v)
