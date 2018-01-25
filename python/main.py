@@ -14,8 +14,8 @@ else:
 	exe_path = dir_ = os.path.dirname(os.path.realpath(__file__))
 	hg.LoadPlugins()
 
-# hg.SetDefaultLogOutputIsDetailed(True)
-# hg.SetDefaultLogOutputLevelMask(hg.LogLevelAll)
+hg.SetLogIsDetailed(True)
+hg.SetLogLevel(hg.LogAll)
 
 plus = hg.GetPlus()
 #plus.CreateWorkers()
@@ -44,16 +44,21 @@ cam = plus.AddCamera(scn, mat4.TranslationMatrix(vec3(0, 0, -5)))
 cam.GetCamera().SetZNear(1)
 cam.GetCamera().SetZFar(100000)  # 100km
 
-fps = hg.FPSController(0, 1, -10)
+fps = hg.FPSController(0, 0, -2)
 fps.SetSmoothFactor(0.3, 0.3)
 
 font = hg.RasterFont("@assets/fonts/Handel Gothic D Bold.ttf", 16)		
+
+navier_stokes.setup()
 
 while not plus.IsAppEnded():
 	dt_sec = plus.UpdateClock()
 	#fps.UpdateAndApplyToNode(cam, dt_sec)
 	
 	navier_stokes.simulation_step(simple_graphic_scene_overlay, hg.time_to_sec_f(dt_sec))
+
+	fps.ApplyToNode(cam)	
+	plus.GetRenderer().SetProjectionMatrix(cam.GetCamera().GetProjectionMatrix(plus.GetRenderer().GetAspectRatio()))
 	plus.UpdateScene(scn, dt_sec)
 	
 	plus.Flip()
