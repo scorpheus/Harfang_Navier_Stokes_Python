@@ -9,9 +9,14 @@
 #include "foundation/matrix4.h"
 #include <array>
 
-static const int N = 30;
-static const int NPlus2 = N + 2;
-static const int size = (N + 2) * (N + 2) * (N + 2);
+static const int navier_width = 20;
+static const int navier_height = 70;
+static const int navier_depth = 20;
+
+static const int navier_width_plus2 = navier_width + 2;
+static const int navier_height_plus2 = navier_height +2;
+static const int navier_depth_plus2 = navier_depth + 2;
+static const int size = navier_width_plus2 * navier_height_plus2 * navier_depth_plus2;
 
 typedef std::array<float, size> farray;
 
@@ -25,7 +30,7 @@ float visc = 0.0;
 float diff = 0.0;
 float base_force_u = 5.f;
 float base_force_v = 60.f; 
-float base_force_w = 60.f;
+float base_force_w = 5;
 float base_force_dens = 1000.f;
 
 farray u{};
@@ -37,15 +42,16 @@ farray w_prev{};
 farray dens{};
 farray dens_prev{};
 
-#define IX(i, j, k) (int(i) + NPlus2 * int(j) + NPlus2 * NPlus2 * int(k))
+#define IX(i, j, k) (int(i) + navier_width_plus2 * int(j) + navier_width_plus2 * navier_height_plus2 * int(k))
 
-void add_source(const int &N, farray &x, farray &s, const float &dt) {
+void add_source(farray &x, farray &s, const float &dt) {
 #pragma omp parallel for
 	for (int i = 0; i < size; ++i)
 		x[i] += dt * s[i];
 }
 
 void set_bnd(const int &N, const int &b, farray &x) {
+	return;
 #pragma omp parallel for
 	for (int i = 1; i <= N + 1; ++i)
 		for (int j = 1; j <= N + 1; ++j) {
@@ -85,29 +91,29 @@ void set_bnd(const int &N, const int &b, farray &x) {
 	x[IX(N + 1, N + 1, N + 1)] = (x[IX(N, N + 1, 0)] + x[IX(N + 1, N, 0)] + x[IX(N + 1, N + 1, N)]) / 3.f;
 }
 
-void lin_solve(const int &N, const int &b, farray &x, farray &x0, const float &a, const float &c) {
+void lin_solve(const int &N, const int &O, const int &P, const int &b, farray &x, farray &x0, const float &a, const float &c) {
 	for (int k = 0; k < 20; ++k) {
 #pragma omp parallel for
 		for (int i = 1; i <= N + 1; ++i)
-			for (int j = 1; j <= N + 1; ++j)
-				for (int k = 1; k <= N + 1; ++k)
+			for (int j = 1; j <= O + 1; ++j)
+				for (int k = 1; k <= P + 1; ++k)
 					x[IX(i, j, k)] = (x0[IX(i, j, k)] + a * (x[IX(i - 1, j, k)] + x[IX(i + 1, j, k)] + x[IX(i, j - 1, k)] + x[IX(i, j + 1, k)] + x[IX(i, j, k - 1)] + x[IX(i, j, k + 1)])) / c;
 
 		set_bnd(N, b, x);
 	}
 }
 
-void diffuse(const int &N, const int &b, farray &x, farray &x0, const float &diff, const float &dt) {
-	float a = dt * diff * N * N * N;
-	lin_solve(N, b, x, x0, a, 1 + 6 * a);
+void diffuse(const int &N, const int &O, const int &P, const int &b, farray &x, farray &x0, const float &diff, const float &dt) {
+	float a = dt * diff * N * O * P;
+	lin_solve(N, O, P, b, x, x0, a, 1 + 6 * a);
 }
 
-void advect(const int &N, const int &b, farray &d, farray &d0, farray &u, farray &v, farray &w, const float &dt) {
+void advect(const int &N, const int &O, const int &P, const int &b, farray &d, farray &d0, farray &u, farray &v, farray &w, const float &dt) {
 	float dt0 = dt * N;
 #pragma omp parallel for
 	for (int i = 1; i <= N + 1; ++i)
-		for (int j = 1; j <= N + 1; ++j)
-			for (int k = 1; k <= N + 1; ++k) {
+		for (int j = 1; j <= O + 1; ++j)
+			for (int k = 1; k <= P + 1; ++k) {
 				float x = i - dt0 * u[IX(i, j, k)];
 				float y = j - dt0 * v[IX(i, j, k)];
 				float z = k - dt0 * w[IX(i, j, k)];
@@ -120,15 +126,15 @@ void advect(const int &N, const int &b, farray &d, farray &d0, farray &u, farray
 
 				if (y < 0.5f)
 					y = 0.5f;
-				if (y > N + 0.5f)
-					y = N + 0.5f;
+				if (y > O + 0.5f)
+					y = O + 0.5f;
 				float j0 = floor(y);
 				float j1 = j0 + 1;
 
 				if (z < 0.5f)
 					z = 0.5f;
-				if (z > N + 0.5f)
-					z = N + 0.5f;
+				if (z > P + 0.5f)
+					z = P + 0.5f;
 				float k0 = floor(z);
 				float k1 = k0 + 1;
 
@@ -147,51 +153,51 @@ void advect(const int &N, const int &b, farray &d, farray &d0, farray &u, farray
 	set_bnd(N, b, d);
 }
 
-void dens_step(const int &N, farray &x, farray &x0, farray &u, farray &v, farray &w, const float &diff, const float &dt) {
-	add_source(N, x, x0, dt);
-	diffuse(N, 0, x0, x, diff, dt);
-	advect(N, 0, x, x0, u, v, w, dt);
+void dens_step(const int &N, const int &O, const int &P, farray &x, farray &x0, farray &u, farray &v, farray &w, const float &diff, const float &dt) {
+	add_source(x, x0, dt);
+	diffuse(N, O, P, 0, x0, x, diff, dt);
+	advect(N, O, P, 0, x, x0, u, v, w, dt);
 }
 
-void project(const int &N, farray &u, farray &v, farray &w, farray &p, farray &div) {
+void project(const int &N, const int &O, const int &P, farray &u, farray &v, farray &w, farray &p, farray &div) {
 #pragma omp parallel for
 	for (int i = 1; i <= N + 1; ++i)
-		for (int j = 1; j <= N + 1; ++j)
-			for (int k = 1; k <= N + 1; ++k)
+		for (int j = 1; j <= O + 1; ++j)
+			for (int k = 1; k <= P + 1; ++k)
 				div[IX(i, j, k)] = (u[IX(i + 1, j, k)] - u[IX(i - 1, j, k)] + v[IX(i, j + 1, k)] - v[IX(i, j - 1, k)] + w[IX(i, j, k + 1)] - w[IX(i, j, k - 1)]) / (N * -3.f);
 	p.fill(0);
 
 	set_bnd(N, 0, div);
 	set_bnd(N, 0, p);
 
-	lin_solve(N, 0, p, div, 1, 6);
+	lin_solve(N, O, P, 0, p, div, 1, 6);
 #pragma omp parallel for
 	for (int i = 1; i <= N + 1; ++i)
-		for (int j = 1; j <= N + 1; ++j)
-			for (int k = 1; k <= N + 1; ++k) {
+		for (int j = 1; j <= O + 1; ++j)
+			for (int k = 1; k <= P + 1; ++k) {
 				u[IX(i, j, k)] -= 0.5f * N * (p[IX(i + 1, j, k)] - p[IX(i - 1, j, k)]);
-				v[IX(i, j, k)] -= 0.5f * N * (p[IX(i, j + 1, k)] - p[IX(i, j - 1, k)]);
-				w[IX(i, j, k)] -= 0.5f * N * (p[IX(i, j, k + 1)] - p[IX(i, j, k - 1)]);
+				v[IX(i, j, k)] -= 0.5f * O * (p[IX(i, j + 1, k)] - p[IX(i, j - 1, k)]);
+				w[IX(i, j, k)] -= 0.5f * P * (p[IX(i, j, k + 1)] - p[IX(i, j, k - 1)]);
 			}
 	set_bnd(N, 1, u);
 	set_bnd(N, 2, v);
 	set_bnd(N, 3, w);
 }
 
-void vel_step(const int &N, farray &u, farray &v, farray &w, farray &u0, farray &v0, farray &w0, const float &visc, const float &dt) {
-	add_source(N, u, u0, dt);
-	add_source(N, v, v0, dt);
-	add_source(N, w, w0, dt);
+void vel_step(const int &N, const int &O, const int &P, farray &u, farray &v, farray &w, farray &u0, farray &v0, farray &w0, const float &visc, const float &dt) {
+	add_source(u, u0, dt);
+	add_source(v, v0, dt);
+	add_source(w, w0, dt);
 
-	diffuse(N, 1, u0, u, visc, dt);
-	diffuse(N, 2, v0, v, visc, dt);
-	diffuse(N, 3, w0, w, visc, dt);
-	project(N, u0, v0, w0, u, v);
+	diffuse(N, O, P, 1, u0, u, visc, dt);
+	diffuse(N, O, P, 2, v0, v, visc, dt);
+	diffuse(N, O, P, 3, w0, w, visc, dt);
+	project(N, O, P, u0, v0, w0, u, v);
 
-	advect(N, 1, u, u0, u0, v0, w0, dt);
-	advect(N, 2, v, v0, u0, v0, w0, dt);
-	advect(N, 3, w, w0, u0, v0, w0, dt);
-	project(N, u, v, w, u0, v0);
+	advect(N, O, P, 1, u, u0, u0, v0, w0, dt);
+	advect(N, O, P, 2, v, v0, u0, v0, w0, dt);
+	advect(N, O, P, 3, w, w0, u0, v0, w0, dt);
+	project(N, O, P, u, v, w, u0, v0);
 }
 
 void get_from_UI(farray &dens_prev, farray &u_prev, farray &v_prev, farray &w_prev) {
@@ -208,16 +214,16 @@ void get_from_UI(farray &dens_prev, farray &u_prev, farray &v_prev, farray &w_pr
 
 	auto size_window = plus.GetRenderWindowSize(plus.GetRenderWindow());
 	if (plus.MouseButtonDown(hg::Button0) && plus.KeyDown(hg::KeyLCtrl))
-		dens_prev[IX((mouse_pos.x / size_window.x) * N, (mouse_pos.y / size_window.y) * N, N / 2.f)] = base_force_dens;
+		dens_prev[IX((mouse_pos.x / size_window.x) * navier_width, (mouse_pos.y / size_window.y) * navier_height, navier_depth / 2.f)] = base_force_dens;
 	if (plus.MouseButtonDown(hg::Button1)) {
-		u_prev[IX((mouse_pos.x / size_window.x) * N, (mouse_pos.y / size_window.y) * N, N / 2.f)] = base_force_u * mouse_dt.x;
-		v_prev[IX((mouse_pos.x / size_window.x) * N, (mouse_pos.y / size_window.y) * N, N / 2.f)] = base_force_v * mouse_dt.y;
+		u_prev[IX((mouse_pos.x / size_window.x) * navier_width, (mouse_pos.y / size_window.y) * navier_height, navier_depth / 2.f)] = base_force_u * mouse_dt.x;
+		v_prev[IX((mouse_pos.x / size_window.x) * navier_width, (mouse_pos.y / size_window.y) * navier_height, navier_depth / 2.f)] = base_force_v * mouse_dt.y;
 	}
 	if (plus.KeyDown(hg::KeySpace)) {
-		dens_prev[IX(N / 2.f, 1, N / 2.f)] = base_force_dens;
-		v_prev[IX(N / 2.f, 3, N / 2.f)] = base_force_v * 10.0f;
-		u_prev[IX(N / 2.f, 3, N / 2.f)] = base_force_u * hg::FRand(2.0f);
-		w_prev[IX(N / 2.f, 3, N / 2.f)] = base_force_w * hg::FRand(2.0f);
+		dens_prev[IX(navier_width / 2.f, 1, navier_depth / 2.f)] = base_force_dens;
+		v_prev[IX(navier_width / 2.f, 3, navier_depth / 2.f)] = base_force_v * 10.0f;
+		u_prev[IX(navier_width / 2.f, 3, navier_depth / 2.f)] = base_force_u * hg::FRand(2.0f);
+		w_prev[IX(navier_width / 2.f, 3, navier_depth / 2.f)] = base_force_w * hg::FRand(2.0f);
 	}
 }
 
@@ -249,7 +255,7 @@ void draw_iso_surface(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_gra
 	for (int i = 0; i < size; ++i)
 		iso_array[i] = dens[i] / 100.f;
 
-	hg::PolygoniseIsoSurface(N, N, N, iso_array.data(), ui_iso_level, *iso, hg::Vector3(1.f / N, 1.f / N, 1.f / N));
+	hg::PolygoniseIsoSurface(navier_width, navier_depth, navier_height, iso_array.data(), ui_iso_level, *iso, hg::Vector3(1.f / navier_width, 1.f / navier_width, 1.f / navier_width));
 
 	auto mat = plus.LoadMaterial("@assets/default.mat");
 	auto geo = std::make_shared<hg::RenderGeometry>();
@@ -258,14 +264,14 @@ void draw_iso_surface(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_gra
 	simple_graphic_scene_overlay->Geometry(0.5f, -0.5f, -0.5f, -1.57f, -1.57f, -1.57f, 1, 1, 1, geo);
 }
 
-void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_scene_overlay, hg::Matrix3 billboard_mat, const int &N, farray &dens, farray &u, farray &v, farray &w) {
+void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_scene_overlay, hg::Matrix3 billboard_mat, const int &N, const int &O, const int &P, farray &dens, farray &u, farray &v, farray &w) {
 	float scale = 2.f;
 	if (ui_draw_billboard) {
 		simple_graphic_scene_overlay->SetDepthTest(false);
 		simple_graphic_scene_overlay->SetBlendMode(hg::BlendAdditive);
 		for (int i = 1; i <= N + 1; ++i)
-			for (int j = 1; j <= N + 1; ++j)
-				for (int k = 1; k <= N + 1; ++k) {
+			for (int j = 1; j <= O + 1; ++j)
+				for (int k = 1; k <= P + 1; ++k) {
 					hg::Vector3 p(i / float(N) - 0.5f, j / float(N) - 0.5f, k / float(N) - 0.5f);
 					float density = dens[IX(i, j, k)]/100.f;
 					draw_quad(simple_graphic_scene_overlay, hg::Matrix4::TransformationMatrix(p, billboard_mat), scale / N, scale / N, nullptr, hg::Color(0, density, density, 1));
@@ -275,8 +281,8 @@ void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_sc
 
 	if (ui_draw_line)
 		for (int i = 1; i <= N + 1; ++i)
-			for (int j = 1; j <= N + 1; ++j)
-				for (int k = 1; k <= N + 1; ++k) {
+			for (int j = 1; j <= O + 1; ++j)
+				for (int k = 1; k <= P + 1; ++k) {
 					hg::Vector3 p(i / float(N) - 0.5f, j / float(N) - 0.5f, k / float(N) - 0.5f);
 					draw_line(simple_graphic_scene_overlay, p, p + hg::Vector3(u[IX(i, j, k)], v[IX(i, j, k)], w[IX(i, j, k)]));
 				}
@@ -285,12 +291,12 @@ void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_sc
 void simulation_step(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_scene_overlay, hg::Matrix3 billboard_mat, const float &dt) {
 	if (ImGui::Begin("params")) {
 		ImGui::Text("Press Space for small puff");
-		ImGui::SliderFloat("visc", &visc, 0.0, 10.0);
-		ImGui::SliderFloat("diff", &diff, 0.0, 1000.0);
-		ImGui::SliderFloat("base_force_u", &base_force_u, 0.0, 1000.0);
-		ImGui::SliderFloat("base_force_v", &base_force_v, 0.0, 1000.0);
-		ImGui::SliderFloat("base_force_w", &base_force_w, 0.0, 1000.0);
-		ImGui::SliderFloat("base_force_dens", &base_force_dens, 0.0, 1000.0);
+		ImGui::SliderFloat("visc", &visc, 0.0, 1.f);
+		ImGui::SliderFloat("diff", &diff, 0.0, 1.f);
+		ImGui::SliderFloat("base_force_u", &base_force_u, 0.0, 1000.0f);
+		ImGui::SliderFloat("base_force_v", &base_force_v, 0.0, 1000.0f);
+		ImGui::SliderFloat("base_force_w", &base_force_w, 0.0, 1000.0f);
+		ImGui::SliderFloat("base_force_dens", &base_force_dens, 0.0, 1000.0f);
 		ImGui::Checkbox("Draw Vector Field", &ui_draw_line);
 		ImGui::Checkbox("Draw iso surface", &ui_draw_iso);
 		if (ui_draw_iso)
@@ -301,9 +307,9 @@ void simulation_step(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_grap
 	ImGui::End();
 
 	get_from_UI(dens_prev, u_prev, v_prev, w_prev);
-	vel_step(N, u, v, w, u_prev, v_prev, w_prev, visc, dt);
-	dens_step(N, dens, dens_prev, u, v, w, diff, dt);
-	draw_dens(simple_graphic_scene_overlay, billboard_mat, N, dens, u, v, w);
+	vel_step(navier_width, navier_height, navier_depth, u, v, w, u_prev, v_prev, w_prev, visc/1000.f, dt);
+	dens_step(navier_width, navier_height, navier_depth, dens, dens_prev, u, v, w, diff/1000.f, dt);
+	draw_dens(simple_graphic_scene_overlay, billboard_mat, navier_width, navier_height, navier_depth, dens, u, v, w);
 	if (ui_draw_iso)
 		draw_iso_surface(simple_graphic_scene_overlay, dens);
 }

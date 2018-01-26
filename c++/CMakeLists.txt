@@ -69,7 +69,7 @@ TARGET_LINK_LIBRARIES(navier_stokes ${HARFANG_LIBS})
 
 
 add_custom_command(TARGET navier_stokes POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory ${HARFANG_SDK}/bin/${CMAKE_CFG_INTDIR} ${PROJECT_SOURCE_DIR}/executable
+	COMMAND ${CMAKE_COMMAND} -E copy_directory ${HARFANG_SDK}/bin/${CMAKE_CFG_INTDIR} $<TARGET_FILE_DIR:navier_stokes>
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ../assets ${PROJECT_SOURCE_DIR}/executable/assets
 	COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:navier_stokes> "${PROJECT_SOURCE_DIR}/executable"
 	COMMENT "Deploying navier_stokes")

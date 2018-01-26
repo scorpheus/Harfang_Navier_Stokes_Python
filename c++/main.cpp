@@ -24,6 +24,9 @@ int main(int argc, char *argv[]) {
 	LoadPlugins();
 	g_fs.get().Mount(std::make_shared<StdFileDriver>("assets"), "@assets/");
 
+	//SetLogIsDetailed(true);
+	//SetLogLevel(LogAll);
+
 	auto &plus = g_plus.get();
 	plus.RenderInit(1600, 900, 4, Window::Windowed);
 	plus.GetRendererAsync()->SetVSync(false);
