@@ -24,8 +24,8 @@ int main(int argc, char *argv[]) {
 	LoadPlugins();
 	g_fs.get().Mount(std::make_shared<StdFileDriver>("assets"), "@assets/");
 
-	//SetLogIsDetailed(true);
-	//SetLogLevel(LogAll);
+	SetLogIsDetailed(true);
+	SetLogLevel(LogAll);
 
 	auto &plus = g_plus.get();
 	plus.RenderInit(1600, 900, 4, Window::Windowed);
@@ -40,12 +40,15 @@ int main(int argc, char *argv[]) {
 	auto simple_graphic_scene_overlay = std::make_shared<SimpleGraphicSceneOverlay>(false);
 	scn->AddComponent(simple_graphic_scene_overlay);
 
-	auto cam = plus.AddCamera(*scn, Matrix4::TranslationMatrix(Vector3(0, 0, -2)));
-	cam->GetComponent<Camera>()->SetZNear(1);
+	auto cam = plus.AddCamera(*scn, Matrix4::TranslationMatrix(Vector3(0, 0.0f, -2)));
+	cam->GetComponent<Camera>()->SetZNear(0.1);
 	cam->GetComponent<Camera>()->SetZFar(10000);
 
 	OrbitalController controller;
-	controller.Reset(Vector3(0, 0, 0), 3.f);
+	controller.Reset(Vector3(0, 0.f, 0), 4.f);
+
+	setup_navier_stokes();
+	scn->GetFrameCompleteSignal().Connect(&on_frame_complete);
 
 	while (1) {
 		plus.Clear(Color(0.1f, 0.1f, 0.1f));

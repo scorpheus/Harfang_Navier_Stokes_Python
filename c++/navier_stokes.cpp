@@ -10,7 +10,7 @@
 #include <array>
 
 static const int navier_width = 20;
-static const int navier_height = 70;
+static const int navier_height = 30;
 static const int navier_depth = 20;
 
 static const int navier_width_plus2 = navier_width + 2;
@@ -20,17 +20,20 @@ static const int size = navier_width_plus2 * navier_height_plus2 * navier_depth_
 
 typedef std::array<float, size> farray;
 
+int first_use = 10;
 bool ui_draw_line = false;
 bool ui_draw_iso = false;
-bool ui_draw_billboard = true;
-float ui_iso_level = 0.05f;
+bool ui_draw_billboard = false;
+bool ui_draw_raymarch = true;
+float ui_iso_level = 0.005f;
 farray iso_array;
+farray raymarch_array;
 
 float visc = 0.0;
 float diff = 0.0;
 float base_force_u = 5.f;
 float base_force_v = 60.f; 
-float base_force_w = 5;
+float base_force_w = 60.f;
 float base_force_dens = 1000.f;
 
 farray u{};
@@ -50,45 +53,53 @@ void add_source(farray &x, farray &s, const float &dt) {
 		x[i] += dt * s[i];
 }
 
-void set_bnd(const int &N, const int &b, farray &x) {
-	return;
+void set_bnd(const int &N, const int &O, const int &P, const int &b, farray &x) {
 #pragma omp parallel for
-	for (int i = 1; i <= N + 1; ++i)
-		for (int j = 1; j <= N + 1; ++j) {
+	for (int i = 1; i <= O + 1; ++i)
+		for (int j = 1; j <= P + 1; ++j) {
 			if (b == 1) {
 				x[IX(0, i, j)] = x[IX(1, i, j)] * -1.f;
 				x[IX(N + 1, i, j)] = x[IX(N, i, j)] * -1.f;
-			} else {
+			}
+			else {
 				x[IX(0, i, j)] = x[IX(1, i, j)];
 				x[IX(N + 1, i, j)] = x[IX(N, i, j)];
 			}
-
+		}
+#pragma omp parallel for
+	for (int i = 1; i <= N + 1; ++i)
+		for (int j = 1; j <= P + 1; ++j) {
 			if (b == 2) {
 				x[IX(i, 0, j)] = x[IX(i, 1, j)] * -1.f;
-				x[IX(i, N + 1, j)] = x[IX(i, N, j)] * -1.f;
-			} else {
-				x[IX(i, 0, j)] = x[IX(i, 1, j)];
-				x[IX(i, N + 1, j)] = x[IX(i, N, j)];
+				x[IX(i, O + 1, j)] = x[IX(i, O, j)] * -1.f;
 			}
-
+			else {
+				x[IX(i, 0, j)] = x[IX(i, 1, j)];
+				x[IX(i, O + 1, j)] = x[IX(i, O, j)];
+			}
+		}
+#pragma omp parallel for
+	for (int i = 1; i <= N + 1; ++i)
+		for (int j = 1; j <= O + 1; ++j) {
 			if (b == 3) {
 				x[IX(i, j, 0)] = x[IX(i, j, 1)] * -1.f;
-				x[IX(i, j, N + 1)] = x[IX(i, j, N)] * -1.f;
-			} else {
+				x[IX(i, j, P + 1)] = x[IX(i, j, P)] * -1.f;
+			}
+			else {
 				x[IX(i, j, 0)] = x[IX(i, j, 1)];
-				x[IX(i, j, N + 1)] = x[IX(i, j, N)];
+				x[IX(i, j, P + 1)] = x[IX(i, j, P)];
 			}
 		}
 
 	x[IX(0, 0, 0)] = (x[IX(1, 0, 0)] + x[IX(0, 1, 0)] + x[IX(0, 0, 1)]) / 3.f;
-	x[IX(0, N + 1, 0)] = (x[IX(1, N + 1, 0)] + x[IX(0, N, 0)] + x[IX(0, N + 1, 1)]) / 3.f;
+	x[IX(0, O + 1, 0)] = (x[IX(1, O + 1, 0)] + x[IX(0, O, 0)] + x[IX(0, O + 1, 1)]) / 3.f;
 	x[IX(N + 1, 0, 0)] = (x[IX(N, 0, 0)] + x[IX(N + 1, 1, 0)] + x[IX(N + 1, 0, 1)]) / 3.f;
-	x[IX(N + 1, N + 1, 0)] = (x[IX(N, N + 1, 0)] + x[IX(N + 1, N, 0)] + x[IX(N + 1, N + 1, 1)]) / 3.f;
+	x[IX(N + 1, O + 1, 0)] = (x[IX(N, O + 1, 0)] + x[IX(N + 1, O, 0)] + x[IX(N + 1, O + 1, 1)]) / 3.f;
 
-	x[IX(0, 0, N + 1)] = (x[IX(1, 0, 0)] + x[IX(0, 1, 0)] + x[IX(0, 0, N)]) / 3.f;
-	x[IX(0, N + 1, N + 1)] = (x[IX(1, N + 1, 0)] + x[IX(0, N, 0)] + x[IX(0, N + 1, N)]) / 3.f;
-	x[IX(N + 1, 0, N + 1)] = (x[IX(N, 0, 0)] + x[IX(N + 1, 1, 0)] + x[IX(N + 1, 0, N)]) / 3.f;
-	x[IX(N + 1, N + 1, N + 1)] = (x[IX(N, N + 1, 0)] + x[IX(N + 1, N, 0)] + x[IX(N + 1, N + 1, N)]) / 3.f;
+	x[IX(0, 0, P + 1)] = (x[IX(1, 0, 0)] + x[IX(0, 1, 0)] + x[IX(0, 0, P)]) / 3.f;
+	x[IX(0, O + 1, P + 1)] = (x[IX(1, O + 1, 0)] + x[IX(0, O, 0)] + x[IX(0, O + 1, P)]) / 3.f;
+	x[IX(N + 1, 0, P + 1)] = (x[IX(N, 0, 0)] + x[IX(N + 1, 1, 0)] + x[IX(N + 1, 0, P)]) / 3.f;
+	x[IX(N + 1, O + 1, P + 1)] = (x[IX(N, O + 1, 0)] + x[IX(N + 1, O, 0)] + x[IX(N + 1, O + 1, P)]) / 3.f;
 }
 
 void lin_solve(const int &N, const int &O, const int &P, const int &b, farray &x, farray &x0, const float &a, const float &c) {
@@ -99,7 +110,7 @@ void lin_solve(const int &N, const int &O, const int &P, const int &b, farray &x
 				for (int k = 1; k <= P + 1; ++k)
 					x[IX(i, j, k)] = (x0[IX(i, j, k)] + a * (x[IX(i - 1, j, k)] + x[IX(i + 1, j, k)] + x[IX(i, j - 1, k)] + x[IX(i, j + 1, k)] + x[IX(i, j, k - 1)] + x[IX(i, j, k + 1)])) / c;
 
-		set_bnd(N, b, x);
+		set_bnd(N, O, P, b, x);
 	}
 }
 
@@ -150,7 +161,7 @@ void advect(const int &N, const int &O, const int &P, const int &b, farray &d, f
 								 r1 * (s0 * (t0 * d0[IX(i0, j0, k1)] + t1 * d0[IX(i0, j1, k1)]) + s1 * (t0 * d0[IX(i1, j0, k1)] + t1 * d0[IX(i1, j1, k1)]));
 			}
 
-	set_bnd(N, b, d);
+	set_bnd(N, O, P, b, d);
 }
 
 void dens_step(const int &N, const int &O, const int &P, farray &x, farray &x0, farray &u, farray &v, farray &w, const float &diff, const float &dt) {
@@ -167,8 +178,8 @@ void project(const int &N, const int &O, const int &P, farray &u, farray &v, far
 				div[IX(i, j, k)] = (u[IX(i + 1, j, k)] - u[IX(i - 1, j, k)] + v[IX(i, j + 1, k)] - v[IX(i, j - 1, k)] + w[IX(i, j, k + 1)] - w[IX(i, j, k - 1)]) / (N * -3.f);
 	p.fill(0);
 
-	set_bnd(N, 0, div);
-	set_bnd(N, 0, p);
+	set_bnd(N, O, P, 0, div);
+	set_bnd(N, O, P, 0, p);
 
 	lin_solve(N, O, P, 0, p, div, 1, 6);
 #pragma omp parallel for
@@ -179,9 +190,9 @@ void project(const int &N, const int &O, const int &P, farray &u, farray &v, far
 				v[IX(i, j, k)] -= 0.5f * O * (p[IX(i, j + 1, k)] - p[IX(i, j - 1, k)]);
 				w[IX(i, j, k)] -= 0.5f * P * (p[IX(i, j, k + 1)] - p[IX(i, j, k - 1)]);
 			}
-	set_bnd(N, 1, u);
-	set_bnd(N, 2, v);
-	set_bnd(N, 3, w);
+	set_bnd(N, O, P, 1, u);
+	set_bnd(N, O, P, 2, v);
+	set_bnd(N, O, P, 3, w);
 }
 
 void vel_step(const int &N, const int &O, const int &P, farray &u, farray &v, farray &w, farray &u0, farray &v0, farray &w0, const float &visc, const float &dt) {
@@ -219,7 +230,8 @@ void get_from_UI(farray &dens_prev, farray &u_prev, farray &v_prev, farray &w_pr
 		u_prev[IX((mouse_pos.x / size_window.x) * navier_width, (mouse_pos.y / size_window.y) * navier_height, navier_depth / 2.f)] = base_force_u * mouse_dt.x;
 		v_prev[IX((mouse_pos.x / size_window.x) * navier_width, (mouse_pos.y / size_window.y) * navier_height, navier_depth / 2.f)] = base_force_v * mouse_dt.y;
 	}
-	if (plus.KeyDown(hg::KeySpace)) {
+	if (plus.KeyDown(hg::KeySpace) || first_use > 0) {
+		first_use--;
 		dens_prev[IX(navier_width / 2.f, 1, navier_depth / 2.f)] = base_force_dens;
 		v_prev[IX(navier_width / 2.f, 3, navier_depth / 2.f)] = base_force_v * 10.0f;
 		u_prev[IX(navier_width / 2.f, 3, navier_depth / 2.f)] = base_force_u * hg::FRand(2.0f);
@@ -260,12 +272,13 @@ void draw_iso_surface(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_gra
 	auto mat = plus.LoadMaterial("@assets/default.mat");
 	auto geo = std::make_shared<hg::RenderGeometry>();
 	hg::IsoSurfaceToRenderGeometry(plus.GetRenderSystem(), iso, geo, mat);
-	
+
+	simple_graphic_scene_overlay->SetDepthTest(false);
 	simple_graphic_scene_overlay->Geometry(0.5f, -0.5f, -0.5f, -1.57f, -1.57f, -1.57f, 1, 1, 1, geo);
 }
 
 void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_scene_overlay, hg::Matrix3 billboard_mat, const int &N, const int &O, const int &P, farray &dens, farray &u, farray &v, farray &w) {
-	float scale = 2.f;
+	float scale = 1.f;
 	if (ui_draw_billboard) {
 		simple_graphic_scene_overlay->SetDepthTest(false);
 		simple_graphic_scene_overlay->SetBlendMode(hg::BlendAdditive);
@@ -288,6 +301,64 @@ void draw_dens(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_sc
 				}
 }
 
+#include <engine/renderer.h>
+#include <engine/render_system.h>
+#include <engine/set_shader_engine_values.h>
+
+std::shared_ptr<hg::GpuShader> shader;
+std::shared_ptr<hg::Texture> tex;
+bool loaded = false;
+
+void setup_raymarch()
+{
+	hg::Plus &plus = hg::g_plus.get();
+	std::shared_ptr<hg::Renderer> renderer = plus.GetRenderer();
+
+	tex = renderer->NewTexture();
+	// Load shader.
+	shader = renderer->LoadShader("@assets/raymarch_shader.isl");
+}
+
+void setup_navier_stokes()
+{
+	setup_raymarch();
+}
+
+void on_frame_complete(hg::Scene &scn, hg::RenderSystem &render_system)
+{
+	if (!ui_draw_raymarch)
+		return;
+
+	hg::Plus &plus = hg::g_plus.get();
+	// Retrieve renderer.
+	std::shared_ptr<hg::Renderer> renderer = plus.GetRenderer();
+
+	// Render a fullscreen quad and mix frames.
+	renderer->EnableDepthTest(false);
+	renderer->EnableBlending(true);
+	renderer->SetShader(shader);
+
+	float width = navier_width_plus2;
+	float height = navier_height_plus2;
+	float depth = navier_depth_plus2;
+	float size_array = size;
+	
+	renderer->SetShaderFloat(renderer->GetShaderVariable("width"), &width);
+	renderer->SetShaderFloat(renderer->GetShaderVariable("height"), &height);
+	renderer->SetShaderFloat(renderer->GetShaderVariable("depth"), &depth);
+	renderer->SetShaderFloat(renderer->GetShaderVariable("size_array"), &size_array);
+
+	// update the raymarch texture
+#pragma omp parallel for
+	for (int i = 0; i < size; ++i)
+		raymarch_array[i] = dens[i] / 100.f;
+
+	renderer->CreateTexture(*tex, raymarch_array.data(), raymarch_array.size() * sizeof(float), raymarch_array.size(), 1, hg::TextureDepthF, hg::TextureNoAA, hg::TextureIsShaderResource, false);
+	renderer->SetShaderTexture(renderer->GetShaderVariable("array_tex"), *tex);
+
+	render_system.DrawFullscreenQuad(hg::Vector2(0, 0));
+}
+
 void simulation_step(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_graphic_scene_overlay, hg::Matrix3 billboard_mat, const float &dt) {
 	if (ImGui::Begin("params")) {
 		ImGui::Text("Press Space for small puff");
@@ -300,9 +371,17 @@ void simulation_step(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_grap
 		ImGui::Checkbox("Draw Vector Field", &ui_draw_line);
 		ImGui::Checkbox("Draw iso surface", &ui_draw_iso);
 		if (ui_draw_iso)
-			ImGui::SliderFloat("iso level", &ui_iso_level, 0, 1);
+			ImGui::SliderFloat("iso level", &ui_iso_level, 0, 0.1f);
 		
-		ImGui::Checkbox("Draw billboard", &ui_draw_billboard);
+		ImGui::Checkbox("Draw billboard", &ui_draw_billboard); 
+		ImGui::Checkbox("Draw shader raymarch", &ui_draw_raymarch);
+
+		if(ImGui::Button("Clear"))
+		{
+			#pragma omp parallel for
+			for (int i = 0; i < size; ++i)
+				dens[i] = 0;
+		}
 	}
 	ImGui::End();
 
@@ -313,3 +392,4 @@ void simulation_step(std::shared_ptr<hg::SimpleGraphicSceneOverlay> &simple_grap
 	if (ui_draw_iso)
 		draw_iso_surface(simple_graphic_scene_overlay, dens);
 }
+
